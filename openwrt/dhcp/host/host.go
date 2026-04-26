@@ -1,14 +1,21 @@
 package host
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/joneshf/terraform-provider-openwrt/lucirpc"
+	"github.com/joneshf/terraform-provider-openwrt/openwrt/internal/logger"
 	"github.com/joneshf/terraform-provider-openwrt/openwrt/internal/lucirpcglue"
 )
 
@@ -36,6 +43,8 @@ const (
 )
 
 var (
+	macAddressRegexp = regexp.MustCompile("^([[:xdigit:]][[:xdigit:]]:){5}[[:xdigit:]][[:xdigit:]]([[:space:]]+([[:xdigit:]][[:xdigit:]]:){5}[[:xdigit:]][[:xdigit:]])*$")
+
 	addDNSEntriesSchemaAttribute = lucirpcglue.BoolSchemaAttribute[model, lucirpc.Options, lucirpc.Options]{
 		Description:       addDNSEntriesAttributeDescription,
 		ReadResponse:      lucirpcglue.ReadResponseOptionBool(modelSetAddDNSEntries, addDNSEntriesAttribute, addDNSEntriesUCIOption),
@@ -70,13 +79,13 @@ var (
 
 	macAddressSchemaAttribute = lucirpcglue.StringSchemaAttribute[model, lucirpc.Options, lucirpc.Options]{
 		Description:       macAddressAttributeDescription,
-		ReadResponse:      lucirpcglue.ReadResponseOptionString(modelSetMACAddress, macAddressAttribute, macAddressUCIOption),
+		ReadResponse:      readResponseOptionMACAddress,
 		ResourceExistence: lucirpcglue.NoValidation,
-		UpsertRequest:     lucirpcglue.UpsertRequestOptionString(modelGetMACAddress, macAddressAttribute, macAddressUCIOption),
+		UpsertRequest:     upsertRequestOptionMACAddress,
 		Validators: []validator.String{
 			stringvalidator.RegexMatches(
-				regexp.MustCompile("^([[:xdigit:]][[:xdigit:]]:){5}[[:xdigit:]][[:xdigit:]]$"),
-				`must be a valid MAC address (e.g. "12:34:56:78:90:ab")`,
+				macAddressRegexp,
+				`must be one or more valid MAC addresses separated by spaces (e.g. "12:34:56:78:90:ab")`,
 			),
 		},
 	}
@@ -129,3 +138,66 @@ func modelSetHostname(m *model, value types.String)    { m.Hostname = value }
 func modelSetId(m *model, value types.String)          { m.Id = value }
 func modelSetIPAddress(m *model, value types.String)   { m.IPAddress = value }
 func modelSetMACAddress(m *model, value types.String)  { m.MACAddress = value }
+
+func readResponseOptionMACAddress(
+	ctx context.Context,
+	fullTypeName string,
+	terraformType string,
+	section lucirpc.Options,
+	m model,
+) (context.Context, model, diag.Diagnostics) {
+	diagnostics := diag.Diagnostics{}
+	result := types.StringNull()
+
+	value, err := section.GetString(macAddressUCIOption)
+	if err == nil {
+		result = types.StringValue(value)
+		ctx = logger.SetFieldString(ctx, fullTypeName, terraformType, macAddressUCIOption, result)
+		m.MACAddress = result
+		return ctx, m, diagnostics
+	}
+
+	var notFound lucirpc.OptionNotFoundError
+	if errors.As(err, &notFound) {
+		m.MACAddress = result
+		return ctx, m, diagnostics
+	}
+
+	values, listErr := section.GetListString(macAddressUCIOption)
+	if listErr == nil {
+		result = types.StringValue(strings.Join(values, " "))
+		ctx = logger.SetFieldString(ctx, fullTypeName, terraformType, macAddressUCIOption, result)
+		m.MACAddress = result
+		return ctx, m, diagnostics
+	}
+
+	diagnostics.AddAttributeError(
+		path.Root(macAddressAttribute),
+		fmt.Sprintf("unable to parse option: %q", macAddressUCIOption),
+		err.Error(),
+	)
+	m.MACAddress = result
+	return ctx, m, diagnostics
+}
+
+func upsertRequestOptionMACAddress(
+	ctx context.Context,
+	fullTypeName string,
+	options lucirpc.Options,
+	m model,
+) (context.Context, lucirpc.Options, diag.Diagnostics) {
+	value := m.MACAddress
+	if value.IsNull() || value.IsUnknown() {
+		return ctx, options, diag.Diagnostics{}
+	}
+
+	ctx = logger.SetFieldString(ctx, fullTypeName, lucirpcglue.ResourceTerraformType, macAddressAttribute, value)
+	fields := strings.Fields(value.ValueString())
+	if len(fields) == 0 {
+		options[macAddressUCIOption] = lucirpc.String(value.ValueString())
+		return ctx, options, diag.Diagnostics{}
+	}
+
+	options[macAddressUCIOption] = lucirpc.ListString(fields)
+	return ctx, options, diag.Diagnostics{}
+}

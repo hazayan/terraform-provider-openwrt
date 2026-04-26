@@ -118,4 +118,7 @@ terraform.rc
 .history
 .ionide
 
+
+development.log
+
 # End of https://www.toptal.com/developers/gitignore/api/go,macos,terraform,visualstudiocode

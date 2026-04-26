@@ -23,7 +23,7 @@ func main() {
 		return openwrt.New(version, os.LookupEnv)
 	}
 	options := providerserver.ServeOpts{
-		Address: "registry.terraform.io/joneshf/openwrt",
+		Address: "registry.opentofu.org/joneshf/openwrt",
 	}
 	providerserver.Serve(
 		ctx,
