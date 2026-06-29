@@ -1,0 +1,1 @@
+[00001] [2026-06-29T22:45:56Z] [IMPLEMENTATION] Removed stale Beads-era agent ignore metadata and obsolete git-crypt attributes from repository metadata.

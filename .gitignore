@@ -122,6 +122,3 @@ terraform.rc
 development.log
 
 # End of https://www.toptal.com/developers/gitignore/api/go,macos,terraform,visualstudiocode
-AGENTS.md
-CLAUDE.md
-.claude/
